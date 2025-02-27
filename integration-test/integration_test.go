@@ -478,7 +478,7 @@ func setupLibrary(
 			t.Fail()
 		}
 
-		time.Sleep(time.Millisecond * 10)
+		time.Sleep(time.Millisecond * 100)
 	}
 
 	return cmd
