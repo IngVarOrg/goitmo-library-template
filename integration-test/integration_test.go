@@ -299,6 +299,36 @@ func TestLibraryWithInMemoryInvariant(t *testing.T) {
 		require.Equal(t, codes.NotFound, s.Code())
 	})
 
+	t.Run("update book with not existing authors", func(t *testing.T) {
+		ctx := context.Background()
+		client := newGRPCClient(t, grpcPort)
+
+		const (
+			authorName = "TestAuthor"
+			bookName   = "BookForUpdate"
+		)
+		registerRes, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+			Name: authorName,
+		})
+		require.NoError(t, err)
+		authorID := registerRes.GetId()
+		addRes, err := client.AddBook(ctx, &AddBookRequest{
+			Name:     bookName,
+			AuthorId: []string{authorID},
+		})
+		bookId := addRes.GetBook().GetId()
+
+		_, err = client.UpdateBook(ctx, &UpdateBookRequest{
+			Id:        bookId,
+			Name:      "Test book",
+			AuthorIds: []string{uuid.NewString()},
+		})
+
+		s, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.NotFound, s.Code())
+	})
+
 	t.Run("book invalid argument", func(t *testing.T) {
 		ctx := context.Background()
 		client := newGRPCClient(t, grpcPort)
