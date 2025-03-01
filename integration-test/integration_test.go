@@ -329,6 +329,8 @@ func TestLibraryWithInMemoryInvariant(t *testing.T) {
 		require.Equal(t, codes.NotFound, s.Code())
 	})
 
+	// placeholder for a new test
+
 	t.Run("book invalid argument", func(t *testing.T) {
 		ctx := context.Background()
 		client := newGRPCClient(t, grpcPort)
