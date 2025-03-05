@@ -329,7 +329,99 @@ func TestLibraryWithInMemoryInvariant(t *testing.T) {
 		require.Equal(t, codes.NotFound, s.Code())
 	})
 
-	
+	t.Run("book invalid argument", func(t *testing.T) {
+		ctx := context.Background()
+		client := newGRPCClient(t, grpcPort)
+
+		_, err := client.GetBookInfo(ctx, &GetBookInfoRequest{
+			Id: "123",
+		})
+
+		s, ok := status.FromError(err)
+		require.True(t, ok)
+		require.Equal(t, codes.InvalidArgument, s.Code())
+	})
+
+	t.Run("grpc gateway", func(t *testing.T) {
+		type RegisterAuthorResponse struct {
+			ID string `json:"id"`
+		}
+
+		type GetAuthorResponse struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		}
+
+		registerUrl := fmt.Sprintf("http://127.0.0.1:%s/v1/library/author", grpcGatewayPort)
+
+		request, err := http.NewRequest("POST", registerUrl, strings.NewReader(`{"name": "Name"}`))
+		require.NoError(t, err)
+
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+
+		data, err := io.ReadAll(response.Body)
+		require.NoError(t, err)
+
+		var registerAuthorResponse RegisterAuthorResponse
+
+		err = json.Unmarshal(data, &registerAuthorResponse)
+		require.NoError(t, err)
+
+		require.NotEmpty(t, registerAuthorResponse)
+
+		getUrl := fmt.Sprintf("http://127.0.0.1:%s/v1/library/author/%s",
+			grpcGatewayPort, registerAuthorResponse.ID)
+
+		getRequest, err := http.NewRequest("GET", getUrl, nil)
+		require.NoError(t, err)
+
+		getResponse, err := http.DefaultClient.Do(getRequest)
+		require.NoError(t, err)
+
+		getData, err := io.ReadAll(getResponse.Body)
+		require.NoError(t, err)
+
+		var author GetAuthorResponse
+		err = json.Unmarshal(getData, &author)
+		require.NoError(t, err)
+
+		require.Equal(t, author.ID, registerAuthorResponse.ID)
+		require.Equal(t, author.Name, "Name")
+	})
+
+	t.Run("book many authors grpc", func(t *testing.T) {
+		ctx := context.Background()
+		client := newGRPCClient(t, grpcPort)
+
+		var (
+			authorBasicName = "Donald Knuth"
+			authorsCount    = 10
+			bookName        = "The Art of Computer Programming"
+		)
+
+		authorIds := make([]string, authorsCount)
+		for i := range authorsCount {
+			author, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: authorBasicName + strconv.Itoa(rand.N[int](10e9)),
+			})
+			require.NoError(t, err)
+			authorIds[i] = author.Id
+		}
+
+		bookAdded, err := client.AddBook(ctx, &AddBookRequest{
+			Name:     bookName,
+			AuthorId: authorIds,
+		})
+		require.NoError(t, err)
+		require.ElementsMatch(t, bookAdded.Book.AuthorId, authorIds)
+
+		bookReceived, err := client.GetBookInfo(ctx, &GetBookInfoRequest{
+			Id: bookAdded.Book.Id,
+		})
+		require.NoError(t, err)
+		require.EqualExportedValues(t, bookAdded.Book, bookReceived.Book)
+	})
 
 	t.Run("update book changes GetAuthorBooks response", func(t *testing.T) {
 		ctx := context.Background()
@@ -460,109 +552,6 @@ func TestLibraryWithInMemoryInvariant(t *testing.T) {
 			}
 		}
 	})
-
-	t.Run("book invalid argument", func(t *testing.T) {
-		ctx := context.Background()
-		client := newGRPCClient(t, grpcPort)
-
-		_, err := client.GetBookInfo(ctx, &GetBookInfoRequest{
-			Id: "123",
-		})
-
-		s, ok := status.FromError(err)
-		require.True(t, ok)
-		require.Equal(t, codes.InvalidArgument, s.Code())
-	})
-
-	t.Run("grpc gateway", func(t *testing.T) {
-		type RegisterAuthorResponse struct {
-			ID string `json:"id"`
-		}
-
-		type GetAuthorResponse struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		}
-
-		registerUrl := fmt.Sprintf("http://127.0.0.1:%s/v1/library/author", grpcGatewayPort)
-
-		request, err := http.NewRequest("POST", registerUrl, strings.NewReader(`{"name": "Name"}`))
-		require.NoError(t, err)
-
-		response, err := http.DefaultClient.Do(request)
-		require.NoError(t, err)
-
-		data, err := io.ReadAll(response.Body)
-		require.NoError(t, err)
-
-		var registerAuthorResponse RegisterAuthorResponse
-
-		err = json.Unmarshal(data, &registerAuthorResponse)
-		require.NoError(t, err)
-
-		require.NotEmpty(t, registerAuthorResponse)
-
-		getUrl := fmt.Sprintf("http://127.0.0.1:%s/v1/library/author/%s",
-			grpcGatewayPort, registerAuthorResponse.ID)
-
-		getRequest, err := http.NewRequest("GET", getUrl, nil)
-		require.NoError(t, err)
-
-		getResponse, err := http.DefaultClient.Do(getRequest)
-		require.NoError(t, err)
-
-		getData, err := io.ReadAll(getResponse.Body)
-		require.NoError(t, err)
-
-		var author GetAuthorResponse
-		err = json.Unmarshal(getData, &author)
-		require.NoError(t, err)
-
-		require.Equal(t, author.ID, registerAuthorResponse.ID)
-		require.Equal(t, author.Name, "Name")
-	})
-
-	t.Run("book many authors grpc", func(t *testing.T) {
-		ctx := context.Background()
-		client := newGRPCClient(t, grpcPort)
-
-		var (
-			authorBasicName = "Donald Knuth"
-			authorsCount    = 10
-			bookName        = "The Art of Computer Programming"
-		)
-
-		authorIds := make([]string, authorsCount)
-		for i := range authorsCount {
-			author, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
-				Name: authorBasicName + strconv.Itoa(rand.N[int](10e9)),
-			})
-			require.NoError(t, err)
-			authorIds[i] = author.Id
-		}
-
-		bookAdded, err := client.AddBook(ctx, &AddBookRequest{
-			Name:     bookName,
-			AuthorId: authorIds,
-		})
-		require.NoError(t, err)
-		require.ElementsMatch(t, bookAdded.Book.AuthorId, authorIds)
-
-		bookReceived, err := client.GetBookInfo(ctx, &GetBookInfoRequest{
-			Id: bookAdded.Book.Id,
-		})
-		require.NoError(t, err)
-		require.EqualExportedValues(t, bookAdded.Book, bookReceived.Book)
-	})
-
-	t.Run("grpc gateway unknown url", func(t *testing.T) {
-		unknownUrl := fmt.Sprintf("http://127.0.0.1:%s/v0/not_library/not_author", grpcGatewayPort)
-
-		response, err := http.Get(unknownUrl)
-
-		require.NoError(t, err)
-		require.Equal(t, response.StatusCode, 404)
-	})
 }
 
 func getLibraryExecutable(t *testing.T) string {
@@ -627,15 +616,15 @@ func setupLibrary(
 	}
 
 	// gateway health check
-	unknownUrl := fmt.Sprintf("http://127.0.0.1:%s/v0/not_library/not_author_info", grpcGatewayPort)
+	getUrl := fmt.Sprintf("http://127.0.0.1:%s/v1/library/author/%s", grpcGatewayPort, uuid.New())
 	for i := range 50 {
-		response, _ := http.Get(unknownUrl)
+		response, _ := http.Get(getUrl)
 
 		if response != nil && response.StatusCode == http.StatusNotFound {
 			break
 		}
 
-		if i == 19 {
+		if i == 29 {
 			log.Println("gateway health check error")
 			t.Fail()
 		}

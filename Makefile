@@ -94,7 +94,7 @@ bin-deps: .bin-deps
 	rm -rf ./bin
 	mkdir -p ./bin
 
-generate: bin-deps .generate
+generate: bin-deps .generate build
 fast-generate: .generate
 
 .generate:
