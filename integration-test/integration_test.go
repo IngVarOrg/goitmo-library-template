@@ -425,7 +425,7 @@ func TestLibraryWithInMemoryInvariant(t *testing.T) {
 				}
 
 				for range iterations {
-					_, err = client.UpdateBook(ctx, &UpdateBookRequest{
+					_, err := client.UpdateBook(ctx, &UpdateBookRequest{
 						Id:        book.GetId(),
 						Name:      book.GetName(),
 						AuthorIds: newAuthorIds,
