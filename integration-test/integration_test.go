@@ -329,7 +329,137 @@ func TestLibraryWithInMemoryInvariant(t *testing.T) {
 		require.Equal(t, codes.NotFound, s.Code())
 	})
 
-	// placeholder for a new test
+	
+
+	t.Run("update book changes GetAuthorBooks response", func(t *testing.T) {
+		ctx := context.Background()
+		client := newGRPCClient(t, grpcPort)
+
+		const bookName = "Book name"
+		authorNames := []string{"Author1", "Author2"}
+		authorIds := make([]string, 0, 2)
+
+		for _, authorName := range authorNames {
+			registerRes, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: authorName,
+			})
+			require.NoError(t, err)
+			authorIds = append(authorIds, registerRes.GetId())
+		}
+
+		addRes, err := client.AddBook(ctx, &AddBookRequest{
+			Name:     bookName,
+			AuthorId: authorIds,
+		})
+		require.NoError(t, err)
+		book := addRes.GetBook()
+
+		checkAuthorBooks := func(authorId string, book *Book) {
+			books := getAllAuthorBooks(t, authorId, client)
+
+			if book != nil {
+				require.Equal(t, 1, len(books))
+				require.Equal(t, book.GetName(), books[0].GetName())
+				require.Contains(t, books[0].GetAuthorId(), authorId)
+			} else {
+				require.Equal(t, 0, len(books))
+			}
+		}
+
+		checkAuthorBooks(authorIds[0], book)
+		checkAuthorBooks(authorIds[1], book)
+
+		_, err = client.UpdateBook(ctx, &UpdateBookRequest{
+			Id:        book.GetId(),
+			Name:      book.GetName(),
+			AuthorIds: []string{authorIds[0]},
+		})
+		require.NoError(t, err)
+
+		checkAuthorBooks(authorIds[0], book)
+		checkAuthorBooks(authorIds[1], nil)
+	})
+
+	t.Run("update book concurrent calls", func(t *testing.T) {
+		ctx := context.Background()
+		client := newGRPCClient(t, grpcPort)
+
+		const (
+			bookName        = "Book name"
+			authorBasicName = "Author"
+			authorsCount    = 10
+			iterations      = 100
+			workers         = 50
+		)
+
+		authorIds := make([]string, authorsCount)
+		for i := range authorsCount {
+			author, err := client.RegisterAuthor(ctx, &RegisterAuthorRequest{
+				Name: authorBasicName + strconv.Itoa(rand.N[int](1e9)),
+			})
+			require.NoError(t, err)
+			authorIds[i] = author.Id
+		}
+
+		addRes, err := client.AddBook(ctx, &AddBookRequest{
+			Name:     bookName,
+			AuthorId: authorIds,
+		})
+		require.NoError(t, err)
+		book := addRes.GetBook()
+		require.ElementsMatch(t, authorIds, book.GetAuthorId())
+
+		// Now randomly update authors list in hope to break synchronization
+
+		wg := new(sync.WaitGroup)
+		for range workers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				newAuthorIds := make([]string, 0)
+				for _, authorId := range authorIds {
+					if rand.N[int](1e9)%2 == 0 {
+						newAuthorIds = append(newAuthorIds, authorId)
+					}
+				}
+
+				for range iterations {
+					_, err = client.UpdateBook(ctx, &UpdateBookRequest{
+						Id:        book.GetId(),
+						Name:      book.GetName(),
+						AuthorIds: newAuthorIds,
+					})
+					require.NoError(t, err)
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		bookUpdated, err := client.GetBookInfo(ctx, &GetBookInfoRequest{
+			Id: book.GetId(),
+		})
+		require.NoError(t, err)
+		bookUpdatedAuthors := bookUpdated.GetBook().GetAuthorId()
+
+		// check authorship consistency
+
+		for _, authorId := range bookUpdatedAuthors {
+			books := getAllAuthorBooks(t, authorId, client)
+
+			require.Equal(t, 1, len(books))
+			require.Equal(t, book.GetId(), books[0].GetId())
+			require.ElementsMatch(t, bookUpdatedAuthors, books[0].GetAuthorId())
+		}
+
+		for _, authorId := range authorIds {
+			if !slices.Contains(bookUpdatedAuthors, authorId) {
+				books := getAllAuthorBooks(t, authorId, client)
+				require.Equal(t, 0, len(books))
+			}
+		}
+	})
 
 	t.Run("book invalid argument", func(t *testing.T) {
 		ctx := context.Background()
